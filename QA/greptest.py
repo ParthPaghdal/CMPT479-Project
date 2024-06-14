@@ -1,0 +1,305 @@
+#
+# greptest.py - Functional correctness testing for grep implementations.
+# Robert D. Cameron, Dec. 28, 2013
+# Licensed under Academic Free License 3.0
+#
+# Uses an XML test suite with the following format.
+# <greptest>
+# <datafile id="simple1">
+# A few lines of input
+# in this simple test file
+# provide fodder for some simple
+# regexp tests.
+# </datafile>
+#
+# <grepcase regexp="in" datafile="simple1" greplines="1 2"/>
+# <grepcase regexp="[A-Z]" datafile="simple1" greplines="1"/>
+#
+# </greptest>
+
+
+import sys, subprocess, os, optparse, re, codecs, stat
+import xml.parsers.expat
+import sys
+import codecs
+import random
+
+
+
+in_datafile = False
+dataFileName = ""
+
+fileContents = {}
+
+def getFileContents(fileName):
+    if not fileName in fileContents:
+        outfpath = os.path.join(options.datafile_dir, fileName)
+        f = codecs.open(outfpath, encoding='utf-8', mode='r')
+        fileContents[fileName] = f.read()
+        f.close()
+    return fileContents[fileName]
+
+def start_element_open_file(name, attrs):
+    global outf
+    global outfpath
+    global in_datafile
+    global dataFileName
+    if name == 'datafile':
+        idFound = False
+        for a in attrs:
+            if a == 'id':
+                dataFileName = attrs[a]
+                idFound = True
+        if not idFound:
+            print("Expecting id attribute for datafile, but none found.", file=sys.stderr)
+            exit(-1)
+        outfpath = os.path.join(options.datafile_dir, dataFileName)
+        if options.utf16: outf = codecs.open(outfpath, encoding='utf-16BE', mode='w')
+        else: outf = codecs.open(outfpath, encoding='utf-8', mode='w')
+        in_datafile = True
+
+def char_data_write_contents(data):
+    global in_datafile
+    if in_datafile:
+        outf.write(data)
+
+def expected_grep_results(fileName, grepLines, flags):
+    fileData = getFileContents(fileName)
+    if "-Unicode-lines" in flags and flags["-Unicode-lines"] != 0:
+        allLines = fileData.splitlines(True)
+    else:
+        if len(fileData) == 0: allLines = []
+        else:
+            if fileData[-1] == "\n": fileData = fileData[:-1]
+            allLines = [l + "\n" for l in fileData.split('\n')]
+    if "-v" in flags:
+        fileLines = len(allLines)
+        invLines = []
+        for i in range(1, fileLines+1):
+            if not i in grepLines:
+                invLines.append(i)
+        grepLines = invLines
+    if "-l" in flags:
+        if len(grepLines) > 0:
+            return os.path.join(options.datafile_dir, fileName)
+        else: return u""
+    if "-L" in flags:
+        if len(grepLines) == 0:
+            return os.path.join(options.datafile_dir, fileName)
+        else: return u""
+    if "-m" in flags:
+        maxcount = int(flags["-m"])
+        if maxcount < len(grepLines):
+            grepLines = grepLines[0:maxcount]
+    if "-c" in flags:
+        return u"%i" % len(grepLines)
+    result = u""
+    for matchedLine in grepLines:
+        if "-n" in flags:
+            result += u"%i:" % matchedLine
+        result += allLines[matchedLine-1]
+    if len(result) > 0 and result[-1] == u'\n':
+        result = result[:-1]
+    return result
+
+def end_element_close_file(name):
+    global outf
+    global outfpath
+    global in_datafile
+    global dataFileName
+    if name == 'datafile' and in_datafile:
+        outf.close()
+        os.chmod(outfpath, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
+        in_datafile = False
+
+def make_data_files(greptest_xml):
+    p = xml.parsers.expat.ParserCreate()
+    p.StartElementHandler = start_element_open_file
+    p.CharacterDataHandler = char_data_write_contents
+    p.EndElementHandler = end_element_close_file
+    p.Parse(greptest_xml, 1)
+
+def escape_quotes(e):  return e.replace(u"'", u"'\\''")
+
+test_count = 0
+failure_count = 0
+
+
+colorizationRE = re.compile("\x1B\[01;31m\x1B\[K|\x1B\[m")
+def filter_colorization(grep_output):
+    return colorizationRE.sub("", grep_output)
+
+def execute_grep_test(flags, regexp, datafile, expected_result):
+    global test_count
+    global failure_count
+    test_count +=1
+    flag_string = ""
+    for f in flags:
+        if flag_string != "": flag_string += u" "
+        if flags[f] == True: flag_string += f
+        else: flag_string += f + "=" + flags[f]
+    grep_cmd = u"%s %s '%s' %s" % (grep_program_under_test, flag_string, escape_quotes(regexp), os.path.join(options.datafile_dir, datafile))
+    if options.verbose:
+        print("Doing: " + grep_cmd, file=sys.stderr)
+    try:
+        raw_output = subprocess.check_output(grep_cmd.encode('utf-8'), cwd=options.exec_dir, shell=True)
+        grep_out = codecs.decode(raw_output, 'utf-8')
+    except subprocess.CalledProcessError as e:
+        grep_out = codecs.decode(e.output, 'utf-8')
+    except UnicodeDecodeError:
+        msg = u"Test failure: {%s} expecting {%s} got malformed UTF-8" % (grep_cmd, expected_result)
+        print(msg.encode('utf-8'), file=sys.stderr)
+        failure_count += 1
+        return
+    if len(grep_out) > 0 and grep_out[-1] == '\n': grep_out = grep_out[:-1]
+    filtered_out = filter_colorization(grep_out)
+    if filtered_out != expected_result:
+        msg = u"Test failure: {%s} expecting {%s} got {%s}" % (grep_cmd, expected_result, grep_out)
+        print(msg, file=sys.stderr)
+        failure_count += 1
+    else:
+        if options.verbose:
+            msg = u"Test success: regexp {%s} on datafile {%s} expecting {%s} got {%s}" % (regexp, datafile, expected_result, grep_out)
+            print(msg, file=sys.stderr)
+
+flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
+            'counting_choices' : ["-c", "-l", "-L"],
+            '-v' : [],
+            '-n' : [],
+            '-m' : ['2', '5'],
+            '-match-coordinates' : ['2', '8'],
+            '-DisableMatchStar' : [],
+            '-segment-size' : ['8192', '16384', '32768'],
+            '-ccc-type' : ['ternary'],
+            '-colors' : ['always', 'never'],
+            '-EnableTernaryOpt' : []}
+
+def add_random_flags(flags, fileLength):
+    selected = list(fixed_flags.keys())
+    for f in selected:
+        flag_val = fixed_flags[f]
+        if flag_val == []:
+            flags[f] = True
+        else:
+            flags[f] = flag_val
+    flag_keys = list(flag_map.keys())
+    for i in range(options.random_flag_count):
+        rand_flag = flag_keys[random.randint(0, len(flag_map) - 1)]
+        # Avoid duplicate flags and expensive test cases
+        while rand_flag in selected or (rand_flag == "-v" and fileLength > 4000):
+            rand_flag = flag_keys[random.randint(0, len(flag_map) - 1)]
+        selected.append(rand_flag)
+        values = flag_map[rand_flag]
+        if values == []:
+            flags[rand_flag] = True
+        else:
+            choice = values[random.randint(0, len(values) - 1)]
+            if rand_flag[0] == "-":
+                flags[rand_flag] = choice
+            else:
+                flags[choice] = True
+            
+
+def parse_flag_string(flag_string):
+    flags = {}
+    for field in flag_string.split(' '):
+        flag_and_value = field.split('=')
+        flag = flag_and_value[0]
+        if len(flag_and_value) == 1:
+            flags[flag] = True
+        else: flags[flag] = flag_and_value[1]
+    return flags
+
+def start_element_do_test(name, attrs):
+    if name == 'grepcase':
+        if not 'regexp' in attrs or not 'datafile' in attrs:
+            print("Bad grepcase: missing regexp and/or datafile attributes.", file=sys.stderr)
+            return
+        grep_case_flags = {}
+        if 'flags' in attrs:
+            grep_case_flags = parse_flag_string(attrs['flags'])
+        if 'grepcount' in attrs:
+            grep_case_flags["-c"] = True
+            expected_result = attrs['grepcount']
+            if "-m" in grep_case_flags:
+                if int(grep_case_flags["-m"]) < int(attrs['grepcount']):
+                    expected_result = grep_case_flags["-m"]
+            execute_grep_test(grep_case_flags, attrs['regexp'], attrs['datafile'], expected_result)
+        else:
+            if not 'greplines' in attrs:
+                raise Exception('Expecting grepcount or greplines in grepcase')
+            fileLength = len(getFileContents(attrs['datafile']))
+            lines = []
+            if attrs['greplines'] != '':
+                lineFields = attrs['greplines'].split(' ')
+                lines = [int(f) for f in lineFields]
+            if len(grep_case_flags) > 0:
+                expected_result = expected_grep_results(attrs['datafile'], lines, grep_case_flags)
+                execute_grep_test(grep_case_flags, attrs['regexp'], attrs['datafile'], expected_result)
+            else:
+                for i in range(options.tests_per_grepcase):
+                    flags = {}
+                    add_random_flags(flags, fileLength)
+                    expected_result = expected_grep_results(attrs['datafile'], lines, flags)
+                    execute_grep_test(flags, attrs['regexp'], attrs['datafile'], expected_result)
+
+def run_tests(greptest_xml):
+    global test_count
+    global failure_count
+    p = xml.parsers.expat.ParserCreate()
+    p.StartElementHandler = start_element_do_test
+    p.Parse(greptest_xml, 1)
+    print("%i tests executed, %i failures\n"  % (test_count, failure_count), file=sys.stderr)
+    if failure_count > 0: exit(1)
+
+if __name__ == '__main__':
+    QA_dir = os.path.dirname(sys.argv[0])
+    option_parser = optparse.OptionParser(usage='python %prog [options] <grep_executable>', version='1.0')
+    option_parser.add_option('-d', '--datafile_dir',
+                          dest = 'datafile_dir', type='string', default='testfiles',
+                          help = 'directory for test files.')
+    option_parser.add_option('-t', '--testcases',
+                          dest = 'testcases', type='string', default='greptest.xml',
+                          help = 'grep test case file (XML format).')
+    option_parser.add_option('-e', '--exec_dir',
+                          dest = 'exec_dir', type='string', default='.',
+                          help = 'executable directory')
+    option_parser.add_option('--random_seed',
+                          dest = 'random_seed', type='int', default=47367,
+                          help = 'random number seed')
+    option_parser.add_option('--random_flag_count',
+                          dest = 'random_flag_count', type='int', default=0,
+                          help = 'number of random flags to add')
+    option_parser.add_option('--tests_per_grepcase',
+                          dest = 'tests_per_grepcase', type='int', default=1,
+                          help = 'number of tests to generate per grepcase')
+    option_parser.add_option('-v', '--verbose',
+                          dest = 'verbose', action='store_true', default=False,
+                          help = 'verbose output: show successful tests')
+    option_parser.add_option('-U', '--UTF-16',
+                          dest = 'utf16', action='store_true', default=False,
+                          help = 'test UTF-16 processing')
+    option_parser.add_option('--grep_flags',
+                          dest = 'fixed_flag_spec', type='string', default='',
+                          help = 'specify fixed grep flags')
+    options, args = option_parser.parse_args(sys.argv[1:])
+    if len(args) != 1:
+        option_parser.print_usage()
+        sys.exit(1)
+    if not os.path.exists(options.datafile_dir):
+        os.mkdir(options.datafile_dir)
+    if not os.path.isdir(options.datafile_dir):
+        print("Cannot use %s as working test file directory.\n" % options.datafile_dir, file=sys.stderr)
+        sys.exit(1)
+    random.seed(options.random_seed)
+    grep_program_under_test = args[0]
+    print("grep_program: %s" % grep_program_under_test, file=sys.stderr)
+    grep_test_file = open(os.path.join(QA_dir,options.testcases), 'r')
+    grep_test_spec = grep_test_file.read()
+    grep_test_file.close()
+
+    make_data_files(grep_test_spec)
+    global fixed_flags
+    if options.fixed_flag_spec == '': fixed_flags = {}
+    else: fixed_flags = parse_flag_string(options.fixed_flag_spec)
+    run_tests(grep_test_spec)

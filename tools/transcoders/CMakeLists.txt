@@ -1,0 +1,117 @@
+#  Part of the Parabix Project, under the Open Software License 3.0.
+#  SPDX-License-Identifier: OSL-3.0
+
+# module: transcoders
+
+parabix_add_executable(
+NAME
+    gb18030
+SRC
+    gb18030.cpp
+DEPS
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.unicode
+    kernel.util
+    re.adt
+)
+
+parabix_add_executable(
+NAME
+    u8u16
+SRC
+    u8u16.cpp
+DEPS
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    re.cc
+    toolchain
+)
+
+parabix_add_executable(
+NAME
+    u32u8
+SRC
+    u32u8.cpp
+DEPS
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.unicode
+    re.adt
+    re.cc
+    toolchain
+)
+
+parabix_add_executable(
+NAME
+    u32u16
+SRC
+    u32u16.cpp
+DEPS
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.unicode
+    re.adt
+    re.cc
+    toolchain
+)
+
+parabix_add_executable(
+NAME
+    x8u16
+SRC
+    x8u16.cpp
+DEPS
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+)
+
+parabix_add_executable(
+NAME
+    xch
+SRC
+    xch.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+    grep
+)
+
+parabix_add_executable(
+NAME
+    nfd
+SRC
+    nfd.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+    grep
+)
+
