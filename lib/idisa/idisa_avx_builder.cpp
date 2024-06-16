@@ -754,6 +754,10 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
     }
     return IDISA_Builder::mvmd_compress(fw, a, select_mask);
 }
+    if (mBitBlockWidth == 512 && fw == 8){
+//function to complete
+
+    }
 
 Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, llvm::Value * a, unsigned shift) {
     if (shift == 0) return a;
