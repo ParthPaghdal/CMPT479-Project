@@ -727,6 +727,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, 
 #else
 #define AVX512_MASK_COMPRESS_INTRINSIC_64 Intrinsic::x86_avx512_mask_compress
 #define AVX512_MASK_COMPRESS_INTRINSIC_32 Intrinsic::x86_avx512_mask_compress
+#define AVX512_MASK_COMPRESS_INTRINSIC_8 Intrinsic::x86_avx512_mask_compress_8
 #endif
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
@@ -752,12 +753,17 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(64, a), fwCast(64, allZeroes()), CreateBitCast(mask, maskTy)});
 #endif
     }
-    return IDISA_Builder::mvmd_compress(fw, a, select_mask);
-}
+    
     if (mBitBlockWidth == 512 && fw == 8){
-//function to complete
+    //function to complete
+    Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
+    Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_8, fwVectorType(fw));
+    return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
+#endif
 
     }
+    return IDISA_Builder::mvmd_compress(fw, a, select_mask);
+}
 
 Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, llvm::Value * a, unsigned shift) {
     if (shift == 0) return a;
