@@ -24,6 +24,74 @@ inline size_t ceil_udiv(const size_t n, const size_t m) {
 
 namespace kernel {
 
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Value.h>
+#include <llvm/IR/Verifier.h>
+
+class FilterByMask {
+
+//here is what I have done , making using pablo method remains
+public:
+    FilterByMask(llvm::LLVMContext &context)
+        : context(context), builder(context), module("filterByMaskModule", context) {}
+
+    llvm::Function *createFilterByMaskFunction() {
+        llvm::Type *int32Ty = llvm::Type::getInt32Ty(context);
+        llvm::Type *int8PtrTy = llvm::Type::getInt8PtrTy(context);
+        
+        llvm::FunctionType *funcType = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {int8PtrTy, int8PtrTy, int8PtrTy, int32Ty}, false);
+        llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "filterByMask", module);
+        
+        llvm::BasicBlock *entry = llvm::BasicBlock::Create(context, "entry", function);
+        builder.SetInsertPoint(entry);
+        
+        auto args = function->arg_begin();
+        llvm::Value *input = args++;
+        llvm::Value *mask = args++;
+        llvm::Value *output = args++;
+        llvm::Value *size = args;
+        
+        llvm::Value *select_mask = createSelectMask(size, mask);
+        llvm::Value *compressed = mvmd_compress(8, input, select_mask);
+        
+        builder.CreateStore(compressed, output);
+        builder.CreateRetVoid();
+        
+        return function;
+    }
+
+private:
+    llvm::LLVMContext &context;
+    llvm::IRBuilder<> builder;
+    llvm::Module module;
+
+    llvm::Value *createSelectMask(llvm::Value *size, llvm::Value *mask) {
+       
+        return mask; 
+    }
+
+    llvm::Value *mvmd_compress(unsigned fw, llvm::Value *a, llvm::Value *select_mask) {
+        
+        return a; // Placeholder
+    }
+};
+
+/*int main() {
+    llvm::LLVMContext context;
+    FilterByMask filter(context);
+    llvm::Function *func = filter.createFilterByMaskFunction();
+    
+    
+    llvm::verifyFunction(*func, &llvm::errs());
+    
+   
+    filter.getModule().print(llvm::outs(), nullptr);
+    
+    return 0;
+}*/
+
 void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset,
