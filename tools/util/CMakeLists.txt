@@ -36,3 +36,30 @@ DEPS
 )
 
 
+parabix_add_executable(
+NAME
+    packdemo
+SRC
+    packdemo.cpp
+DEPS
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
+
+parabix_add_executable(
+NAME
+    FilterByMask
+SRC
+    filterbymask.cpp
+DEPS
+    pablo
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+)

@@ -727,7 +727,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, 
 #else
 #define AVX512_MASK_COMPRESS_INTRINSIC_64 Intrinsic::x86_avx512_mask_compress
 #define AVX512_MASK_COMPRESS_INTRINSIC_32 Intrinsic::x86_avx512_mask_compress
-#define AVX512_MASK_COMPRESS_INTRINSIC_8 Intrinsic::x86_avx512_mask_compress_8
+#define AVX512_MASK_COMPRESS_INTRINSIC_8 Intrinsic::x86_avx512_mask_compress
 #endif
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
@@ -755,7 +755,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
     }
     
     if (mBitBlockWidth == 512 && fw == 8){
-    //function to complete
+    //function for byte
     Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
     Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_8, fwVectorType(fw));
     return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
@@ -1036,6 +1036,7 @@ void IDISA_AVX512F_Builder::getAVX512Features() {
 
         hostCPUFeatures.hasAVX512VBMI = features.lookup("avx512_vbmi");
         hostCPUFeatures.hasAVX512VBMI2 = features.lookup("avx512_vbmi2");
+        //if has vbmi2 use it.
         hostCPUFeatures.hasAVX512VPOPCNTDQ = features.lookup("avx512_vpopcntdq");
     }
 }
