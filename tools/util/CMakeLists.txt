@@ -35,4 +35,18 @@ DEPS
     toolchain
 )
 
+parabix_add_executable(
+NAME
+    FilterByMask
+SRC
+    filterbymask.cpp
+DEPS
+    pablo
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
 
