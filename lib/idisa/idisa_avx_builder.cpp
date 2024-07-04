@@ -727,7 +727,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, 
 #else
 #define AVX512_MASK_COMPRESS_INTRINSIC_64 Intrinsic::x86_avx512_mask_compress
 #define AVX512_MASK_COMPRESS_INTRINSIC_32 Intrinsic::x86_avx512_mask_compress
-#define AVX512_MASK_COMPRESS_INTRINSIC_8 Intrinsic::x86_avx512_mask_compress_8
+#define AVX512_MASK_COMPRESS_INTRINSIC_8 Intrinsic::x86_avx512_mask_compress
 #endif
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
