@@ -767,6 +767,21 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
     }
     return IDISA_Builder::mvmd_compress(fw, a, select_mask);
 }
+llvm::Value * IDISA_AVX512F_Builder::mvmd_byte_expand(llvm::Value * a, llvm::Value * select_mask) {
+    Type * vecType = FixedVectorType::get(getInt8Ty(), 64);
+
+    Value * mask64 = CreateBitCast(select_mask, getInt64Ty());
+    Value * dataVec = CreateBitCast(a, vecType);
+
+    Value * zeroVec = ConstantVector::getNullValue(vecType);
+    Value * allOnes = Constant::getAllOnesValue(vecType);
+
+    Value * maskVec = CreateSExt(mask64, vecType);
+    Value * expandedMask = CreateAnd(CreateShuffleVector(maskVec, maskVec, ConstantVector::getSplat(8, ConstantInt::get(getInt32Ty(), 0))), allOnes);
+    Value * resultVec = CreateOr(CreateAnd(dataVec, expandedMask), CreateAnd(zeroVec, CreateNot(expandedMask)));
+
+    return resultVec;
+}
 
 Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, llvm::Value * a, unsigned shift) {
     if (shift == 0) return a;
