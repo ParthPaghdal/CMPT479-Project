@@ -298,6 +298,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
     // TODO: we could make this kernel stateless but would have to use "bitblock_mask_to" on the
     // input to account for the fact the pipeline doesn't zero out output stream data when it
     // reuses it.
+    
 
     SmallVector<Value *, 16> pendingData(mStreamCount);
     for (unsigned i = 0; i < mStreamCount; i++) {

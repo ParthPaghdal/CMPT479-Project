@@ -1,4 +1,4 @@
-#include <kernel/io/source_kernel.h>
+#include <kernel/streamutils/deletion.h>
 #include <kernel/io/stdout_kernel.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
