@@ -728,9 +728,11 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, 
 #define AVX512_MASK_COMPRESS_INTRINSIC_64 Intrinsic::x86_avx512_mask_compress
 #define AVX512_MASK_COMPRESS_INTRINSIC_32 Intrinsic::x86_avx512_mask_compress
 #define AVX512_MASK_COMPRESS_INTRINSIC_8 Intrinsic::x86_avx512_mask_compress
+#define AVX512_MASK_EXPAND_INTRINSIC_8 Intrinsic::x86_avx512_mask_expand
 #endif
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
+
     unsigned fieldCount = mBitBlockWidth/fw;
     Value * mask = CreateZExtOrTrunc(select_mask, getIntNTy(fieldCount));
     if (mBitBlockWidth == 512 && fw == 32) {
@@ -754,19 +756,26 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
 #endif
     }
     
-    if (mBitBlockWidth == 512 && fw == 8) {
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(9, 0, 0)
-        Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_b_512);
-        return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), mask});
-#else
+    if (mBitBlockWidth == 512 && fw == 8) { 
+    if (hostCPUFeatures.hasAVX512VBMI2){
         Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
-        return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
-#endif
-    
+        return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});    
+        }
     }
     return IDISA_Builder::mvmd_compress(fw, a, select_mask);
 }
+
+llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
+    unsigned fieldCount = mBitBlockWidth/fw;
+    Value * mask = CreateZExtOrTrunc(select_mask, getIntNTy(fieldCount));
+    if (hostCPUFeatures.hasAVX512VBMI2){
+    Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
+        Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
+        return CreateCall(expandFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
+    }
+}
+
 llvm::Value * IDISA_AVX512F_Builder::mvmd_byte_expand(llvm::Value * a, llvm::Value * select_mask) {
     Type * vecType = FixedVectorType::get(getInt8Ty(), 64);
 
