@@ -1,137 +1,203 @@
+
+#include <idisa/idisa_avx_builder.h>
+#include <kernel/streamutils/stream_select.h>
+#include <kernel/basis/p2s_kernel.h>
+#include <llvm/IR/IRBuilder.h>
+#include <kernel/core/idisa_target.h>
+#include <boost/filesystem.hpp>
+#include <grep/grep_kernel.h>
+#include <re/cc/cc_compiler.h>
+#include <re/cc/cc_compiler_target.h>
+#include <re/adt/adt.h>
+#include <re/parse/parser.h>
+#include <re/transforms/re_simplifier.h>
+#include <re/unicode/resolve_properties.h>
+#include <re/cc/cc_kernel.h>
+#include <kernel/core/kernel_builder.h>
+#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
+#include <kernel/core/streamset.h>
+#include <kernel/unicode/utf8_decoder.h>
+#include <kernel/unicode/UCD_property_kernel.h>
+#include <kernel/streamutils/deletion.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
-#include <llvm/Support/Debug.h>
-#include <kernel/core/kernel_builder.h>
-#include <toolchain/toolchain.h>
+#include <llvm/Support/raw_ostream.h>
+#include <pablo/pablo_kernel.h>
+#include <pablo/builder.hpp>
+#include <pablo/pe_zeroes.h>
+#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <kernel/core/streamset.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <grep/grep_kernel.h>
+#include <toolchain/toolchain.h>
+#include <fileselect/file_select.h>
 #include <fcntl.h>
+#include <iomanip>
+#include <iostream>
+#include <string>
 #include <sys/stat.h>
-#include <unistd.h>
-#include <kernel/io/stdout_kernel.h>
-#include <idisa/idisa_sse_builder.h>
-#include <idisa/idisa_avx_builder.h>
+#include <vector>
+#include <map>
 
 using namespace kernel;
 using namespace llvm;
-using namespace codegen;
 
-static cl::OptionCategory ByteFilterByMaskOptions("Byte Filter By Mask Options", "Options for Byte Filter By Mask.");
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(ByteFilterByMaskOptions));
+static cl::OptionCategory ufFlags("Command Flags", "filter options");
+static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character class expression>"), cl::Required, cl::cat(ufFlags));
+static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"),  cl::cat(ufFlags));
+
+static cl::opt<bool> UseDefaultFilter("default-filter", cl::desc("Use the default byte filter by mask via S2P-FilterByMaks-P2S"), cl::cat(ufFlags));
+
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
 
 class ByteFilterByMaskKernel final : public MultiBlockKernel {
 public:
-    ByteFilterByMaskKernel(KernelBuilder &b, StreamSet *inputStream, StreamSet *outputStream);
-    static constexpr unsigned fw = 8; // Field width
-
+    ByteFilterByMaskKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed);
 protected:
-    void generateMultiBlockLogic(KernelBuilder &b, llvm::Value *const numOfStrides) override;
-    llvm::Value *generateMask(KernelBuilder &b, llvm::Value *inputStreamBlock, llvm::Value *blockOffset);
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
-constexpr unsigned ByteFilterByMaskKernel::fw;
+ByteFilterByMaskKernel::ByteFilterByMaskKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed)
+: MultiBlockKernel(b, "byte_filter_by_mask_kernel",
+{Binding{"byteStream", byteStream, FixedRate(1)}, Binding{"filter", filter, FixedRate(1)}},
+    {Binding{"output", Packed, PopcountOf("filter")}}, {}, {}, {}) {}
 
-ByteFilterByMaskKernel::ByteFilterByMaskKernel(KernelBuilder &b, StreamSet *inputStream, StreamSet *outputStream)
-    : MultiBlockKernel(b, "byte_filter_by_mask_kernel",
-                       {Binding{"inputStream", inputStream, FixedRate(1)}},
-                       {Binding{"outputStream", outputStream, FixedRate(1)}}, {}, {}, {}) {}
+void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
+    BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
+    Constant * const ZERO = b.getSize(0);
 
-void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder &b, Value *const numOfStrides) {
-    const unsigned inputPacksPerStride = fw;
-    BasicBlock *entry = b.GetInsertBlock();
-    BasicBlock *filterLoop = b.CreateBasicBlock("filterLoop");
-    BasicBlock *filterFinalize = b.CreateBasicBlock("filterFinalize");
-    Constant *const ZERO = b.getSize(0);
-
-    Value *numOfBlocks = numOfStrides;
-    if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride() / b.getBitBlockWidth())));
-    }
-
-    b.CreateBr(filterLoop);
-    b.SetInsertPoint(filterLoop);
-
-    PHINode *blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+    b.CreateBr(packLoop);
+    b.SetInsertPoint(packLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
 
-    Value *bytepack[inputPacksPerStride];
-    for (unsigned i = 0; i < inputPacksPerStride; i++) {
-        bytepack[i] = b.loadInputStreamPack("inputStream", ZERO, b.getInt32(i), blockOffsetPhi);
-    }
+    Value * filterVec = b.loadInputStreamBlock("filter", ZERO, blockOffsetPhi);
 
-    Value *mask = generateMask(b, bytepack[0], blockOffsetPhi);
+    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / 8), 8);
 
-    auto &context = b.getContext();
-    IDISA::IDISA_AVX512F_Builder idisaBuilder(context, 512, 8);
+    filterVec = b.CreateBitCast(filterVec, popVecTy);
 
-    Value *compressed = idisaBuilder.mvmd_compress(fw, bytepack[0], mask);
-    Value *compressedCasted = b.CreateBitCast(compressed, bytepack[0]->getType());
+    Value * toWritePos = b.getProducedItemCount("output");
 
-    b.storeOutputStreamPack("outputStream", ZERO, b.getInt32(0), blockOffsetPhi, compressedCasted);
+    for (unsigned i = 0; i < 8; ++i) {
+        Value * const filterElem = b.CreateExtractElement(filterVec, b.getInt32(i));
 
-    Value *nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
-    blockOffsetPhi->addIncoming(nextBlk, filterLoop);
-    Value *moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
-    b.CreateCondBr(moreToDo, filterLoop, filterFinalize);
+        Value * const elementPopCount = b.CreatePopcount(filterElem);
 
-    b.SetInsertPoint(filterFinalize);
-}
-
-llvm::Value *ByteFilterByMaskKernel::generateMask(KernelBuilder &b, llvm::Value *inputStreamBlock, llvm::Value *blockOffset) {
- 
-    Value *one = ConstantInt::get(b.getInt8Ty(), 1);
-    Value *zero = ConstantInt::get(b.getInt8Ty(), 0);
-    Value *mask = UndefValue::get(FixedVectorType::get(b.getInt8Ty(), 512));
-
-  
-    for (int i = 0; i < 64; ++i) {
+        Value * const data = b.loadInputStreamPack("byteStream", ZERO, b.getInt32(i), blockOffsetPhi);
         
-        Value *byteValue = b.CreateExtractElement(inputStreamBlock, b.getInt32(i));
-        Value *offsetCondition = b.CreateICmpEQ(b.CreateAnd(blockOffset, b.getInt64(1)), b.getInt64(0)); 
-        Value *byteCondition = b.CreateICmpEQ(b.CreateAnd(byteValue, b.getInt8(1)), b.getInt8(0));  
-        Value *finalCondition = b.CreateAnd(offsetCondition, byteCondition);
-        mask = b.CreateInsertElement(mask, b.CreateSelect(finalCondition, one, zero), b.getInt32(i));
+        Value * const compressed = b.mvmd_expand(8, data, filterElem);
+
+        Value * const toStorePtr = b.getRawOutputPointer("output", toWritePos);
+
+        b.CreateAlignedStore(compressed, toStorePtr, 1);
+        toWritePos = b.CreateAdd(toWritePos, elementPopCount);
     }
 
-    return mask;
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    blockOffsetPhi->addIncoming(nextBlk, packLoop);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
+
+    b.CreateCondBr(moreToDo, packLoop, packFinalize);
+    b.SetInsertPoint(packFinalize);
 }
 
-typedef void (*ByteFilterByMaskFunctionType)(uint32_t inputFd);
+typedef void (*FilterByMaskFunctionType)(uint32_t fd);
 
-ByteFilterByMaskFunctionType byteFilterByMaskGen(CPUDriver &driver) {
-    auto &b = driver.getBuilder();
-    auto P = driver.makePipeline({Binding{b.getInt32Ty(), "inputFileDescriptor"}}, {});
+FilterByMaskFunctionType filterbymask_gen (CPUDriver & pxDriver, re::Name * CC_name) {
 
-    Scalar *inputFileDescriptor = P->getInputScalar("inputFileDescriptor");
+    auto & b = pxDriver.getBuilder();
+    auto P = pxDriver.makePipeline(
+                {Binding{b.getInt32Ty(), "fileDescriptor"}});
 
-    StreamSet *inputStream = P->CreateStreamSet(1, 8);
-    StreamSet *outputStream = P->CreateStreamSet(1, 8);
+    Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
 
-    P->CreateKernelCall<ReadSourceKernel>(inputFileDescriptor, inputStream);
-    P->CreateKernelCall<ByteFilterByMaskKernel>(inputStream, outputStream);
-    P->CreateKernelCall<StdOutKernel>(outputStream);
+    //  Create a stream set consisting of a single stream of 8-bit units (bytes).
+    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
+    SHOW_BYTES(ByteStream);
 
-    return reinterpret_cast<ByteFilterByMaskFunctionType>(P->compile());
+    //  Read the file into the ByteStream.
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+
+    //  Create a set of 8 parallel streams of 1-bit units (bits).
+    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
+    SHOW_BIXNUM(BasisBits);
+
+    //  Transpose the ByteSteam into parallel bit stream form.
+    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+
+    //  Create a character class bit stream.
+    StreamSet * CCmask = P->CreateStreamSet(1, 1);
+
+    std::map<std::string, StreamSet *> propertyStreamMap;
+    auto nameString = CC_name->getFullName();
+    propertyStreamMap.emplace(nameString, CCmask);
+    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCmask);
+    SHOW_STREAM(CCmask);
+
+    StreamSet * u8index = P->CreateStreamSet(1, 1);
+    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_STREAM(u8index);
+
+    StreamSet * CCspans = P->CreateStreamSet(1, 1);
+    P->CreateKernelCall<U8Spans>(CCmask, u8index, CCspans);
+    SHOW_STREAM(CCspans);
+
+    StreamSet * const FilteredBytes = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<ByteFilterByMaskKernel>(ByteStream, CCspans, FilteredBytes);
+    P->CreateKernelCall<StdOutKernel>(FilteredBytes);
+    SHOW_BYTES(FilteredBytes);
+
+    
+
+    return reinterpret_cast<FilterByMaskFunctionType>(P->compile());
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&ByteFilterByMaskOptions, codegen::codegen_flags()});
-    CPUDriver pxDriver("bytefilterbymask");
+    codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, codegen::codegen_flags()});
+    CPUDriver pxDriver("filter");
 
-    const int inputFd = open(inputFile.c_str(), O_RDONLY);
-    if (LLVM_UNLIKELY(inputFd == -1)) {
-        errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
-        return 1;
+    FilterByMaskFunctionType fnPtr = nullptr;
+    re::RE * CC_re = re::simplifyRE(re::RE_Parser::parse(CC_expr));
+    CC_re = UCD::linkAndResolve(CC_re);
+    CC_re = UCD::externalizeProperties(CC_re);
+    if (re::Name * UCD_property_name = dyn_cast<re::Name>(CC_re)) {
+        fnPtr = filterbymask_gen(pxDriver, UCD_property_name);
+    } else if (re::CC * CC_ast = dyn_cast<re::CC>(CC_re)) {
+        fnPtr = filterbymask_gen(pxDriver, makeName(CC_ast));
+    } else {
+        std::cerr << "Input expression must be a Unicode property or CC but found: " << CC_expr << " instead.\n";
+        exit(1);
     }
 
-    ByteFilterByMaskFunctionType func = byteFilterByMaskGen(pxDriver);
-    func(inputFd);
+    const int fd = open(inputFile.c_str(), O_RDONLY);
+    if (LLVM_UNLIKELY(fd == -1)) {
+        if (errno == EACCES) {
+            std::cerr << "filter: " << inputFile << ": Permission denied.\n";
+        }
+        else if (errno == ENOENT) {
+            std::cerr << "filter: " << inputFile << ": No such file.\n";
+        }
+        else {
+            std::cerr << "filter: " << inputFile << ": Failed.\n";
+        }
+        exit(1);
+    }
+    struct stat sb;
+    if (stat(inputFile.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
+        std::cerr << "filter: " << inputFile << ": Is a directory.\n";
+        close(fd);
+        exit(1);
+    }
 
-    close(inputFd);
-
+    fnPtr(fd);
+    close(fd);
     return 0;
 }
