@@ -82,3 +82,19 @@ toolchain
 re.cc
 re.parse
 )
+parabix_add_executable(
+NAME
+    spreadbymask
+SRC
+    spreadbymask.cpp
+DEPS
+grep
+kernel.basis
+kernel.io
+kernel.pipeline
+kernel.streamutils
+kernel.util
+toolchain
+re.cc
+re.parse
+)
