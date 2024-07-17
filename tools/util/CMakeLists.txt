@@ -1,32 +1,84 @@
-# Part of the Parabix Project, under the Open Software License 3.0.
-# SPDX-License-Identifier: OSL-3.0
+#  Part of the Parabix Project, under the Open Software License 3.0.
+#  SPDX-License-Identifier: OSL-3.0
 
-# Module: util
+# module: util
 
-# Compiler flags (common for both debug and release)
-CXXFLAGS = -I/path/to/kernel/streamutils
-CCFLAGS = -I/path/to/kernel/streamutils
+parabix_add_executable(
+NAME
+    hexlines
+SRC
+    hexlines.cpp
+DEPS
+    pablo
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
 
-# Debug-specific flags
-debug: CXXFLAGS += -DDEBUG -g
-debug: CCFLAGS += -DDEBUG -g
 
-# Targets
-all: hexlines hashdemo filterbymask
+parabix_add_executable(
+NAME
+    hashdemo
+SRC
+    hashdemo.cpp
+DEPS
+    grep
+    pablo
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
 
-# Rule for hexlines
-hexlines: hexlines.cpp
-    $(CXX) $(CXXFLAGS) $< -o $@ $(DEPS)
 
-# Rule for hashdemo
-hashdemo: hashdemo.cpp
-    $(CXX) $(CXXFLAGS) $< -o $@ $(DEPS)
+parabix_add_executable(
+NAME
+    packdemo
+SRC
+    packdemo.cpp
+DEPS
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
 
-# Rule for filterbymask
-filterbymask: filterbymask.cpp
-    $(CXX) $(CXXFLAGS) $< -o $@ $(DEPS)
+parabix_add_executable(
+NAME
+    ufilter
+SRC
+    ufilter.cpp
+DEPS
+    grep
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+    re.cc
+    re.parse
+)
 
-# Clean rule
-clean:
-    rm -f hexlines hashdemo filterbymask *.o
-
+parabix_add_executable(
+NAME
+    bytefilter
+SRC
+    bytefilter.cpp
+DEPS
+grep
+kernel.basis
+kernel.io
+kernel.pipeline
+kernel.streamutils
+kernel.util
+toolchain
+re.cc
+re.parse
+)
