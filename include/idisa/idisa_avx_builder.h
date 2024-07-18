@@ -80,6 +80,8 @@ public:
     llvm::Value * mvmd_shuffle(unsigned fw, llvm::Value * data_table, llvm::Value * index_vector) override;
     llvm::Value * mvmd_shuffle2(unsigned fw, llvm::Value * table0, llvm::Value * table1, llvm::Value * index_vector) override;
     llvm::Value * mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) override;
+    llvm::Value * mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) ;
+    llvm::Value * mvmd_byte_expand(llvm::Value * a, llvm::Value * select_mask);
     llvm::Value * mvmd_srl(unsigned fw, llvm::Value * a, llvm::Value * shift, const bool safe) override;
     llvm::Value * mvmd_sll(unsigned fw, llvm::Value * a, llvm::Value * shift, const bool safe) override;
     llvm::Value * simd_if(unsigned fw, llvm::Value * cond, llvm::Value * a, llvm::Value * b) override;

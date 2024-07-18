@@ -772,10 +772,10 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
     if (hostCPUFeatures.hasAVX512VBMI2){
     Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
-        return CreateCall(expandFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
+        return CreateCall(expandFunc->getFunctionType(), expandFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
     }
 }
-
+/*
 llvm::Value * IDISA_AVX512F_Builder::mvmd_byte_expand(llvm::Value * a, llvm::Value * select_mask) {
     Type * vecType = FixedVectorType::get(getInt8Ty(), 64);
 
@@ -791,7 +791,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_byte_expand(llvm::Value * a, llvm::Val
 
     return resultVec;
 }
-
+*/
 Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, llvm::Value * a, unsigned shift) {
     if (shift == 0) return a;
     if (fw > 32) {
