@@ -774,6 +774,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
         return CreateCall(expandFunc->getFunctionType(), expandFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
     }
+    return IDISA_Builder::mvmd_expand(fw, a, select_mask);
 }
 /*
 llvm::Value * IDISA_AVX512F_Builder::mvmd_byte_expand(llvm::Value * a, llvm::Value * select_mask) {

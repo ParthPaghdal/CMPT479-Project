@@ -1023,6 +1023,13 @@ Value * IDISA_Builder::mvmd_compress(unsigned fw, Value * v, Value * select_mask
     return selected;
 }
 
+Value * IDISA_Builder::mvmd_expand(unsigned fw, Value * v, Value * select_mask) {
+
+return nullptr;
+
+}
+
+
 Value * IDISA_Builder::bitblock_any(Value * a) {
     if (a->getType()->isIntegerTy()) {
         return CreateICmpNE(a, ConstantInt::getNullValue(a->getType()));
