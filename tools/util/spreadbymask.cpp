@@ -22,6 +22,11 @@
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/streamutils/deletion.h>
+#include <kernel/streamutils/pdep_kernel.h>
+#include <kernel/streamutils/stream_select.h>
+#include <kernel/streamutils/stream_shift.h>
+#include <kernel/basis/p2s_kernel.h>
+#include <kernel/scan/scanmatchgen.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
@@ -45,29 +50,29 @@
 using namespace kernel;
 using namespace llvm;
 
-static cl::OptionCategory ufFlags("Command Flags", "filter options");
+static cl::OptionCategory ufFlags("Command Flags", "spread options");
 static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character class expression>"), cl::Required, cl::cat(ufFlags));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"),  cl::cat(ufFlags));
 
-static cl::opt<bool> UseDefaultFilter("default-filter", cl::desc("Use the default byte filter by mask via S2P-FilterByMaks-P2S"), cl::cat(ufFlags));
+static cl::opt<bool> UseDefaultspread("default-spread", cl::desc("Use the default byte spread by mask via S2P-spreadByMaks-P2S"), cl::cat(ufFlags));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
 
-class ByteFilterByMaskKernel final : public MultiBlockKernel {
+class BytespreadByMaskKernel final : public MultiBlockKernel {
 public:
-    ByteFilterByMaskKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed);
+    BytespreadByMaskKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const Packed);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
-ByteFilterByMaskKernel::ByteFilterByMaskKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed)
-: MultiBlockKernel(b, "byte_filter_by_mask_kernel",
-{Binding{"byteStream", byteStream, FixedRate(1)}, Binding{"filter", filter, FixedRate(1)}},
-    {Binding{"output", Packed, PopcountOf("filter")}}, {}, {}, {}) {}
+BytespreadByMaskKernel::BytespreadByMaskKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const Packed)
+: MultiBlockKernel(b, "byte_spread_by_mask_kernel",
+{Binding{"byteStream", byteStream, FixedRate(1)}, Binding{"spread", spread, FixedRate(1)}},
+    {Binding{"output", Packed, PopcountOf("spread")}}, {}, {}, {}) {}
 
-void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
     BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
@@ -78,26 +83,31 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
 
-    Value * filterVec = b.loadInputStreamBlock("filter", ZERO, blockOffsetPhi);
+    Value * spreadVec = b.loadInputStreamBlock("spread", ZERO, blockOffsetPhi);
 
     VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / 8), 8);
 
-    filterVec = b.CreateBitCast(filterVec, popVecTy);
+    spreadVec = b.CreateBitCast(spreadVec, popVecTy);
 
     Value * toWritePos = b.getProducedItemCount("output");
 
     for (unsigned i = 0; i < 8; ++i) {
-        Value * const filterElem = b.CreateExtractElement(filterVec, b.getInt32(i));
+        Value * const spreadElem = b.CreateExtractElement(spreadVec, b.getInt32(i));
 
-        Value * const elementPopCount = b.CreatePopcount(filterElem);
+        Value * const elementPopCount = b.CreatePopcount(spreadElem);
 
         Value * const data = b.loadInputStreamPack("byteStream", ZERO, b.getInt32(i), blockOffsetPhi);
         
-        Value * const compressed = b.mvmd_expand(8, data, filterElem);
+        Value * const expanded = b.mvmd_expand(8, data, spreadElem);
+
+        // Debugging statements using llvm::outs()
+        llvm::outs() << "spreadElem" << i << ": " << *spreadElem << "\n";
+        llvm::outs() << "data" << i << ": " << *data << "\n";
+        llvm::outs() << "expanded" << i << ": " << *expanded << "\n";
 
         Value * const toStorePtr = b.getRawOutputPointer("output", toWritePos);
 
-        b.CreateAlignedStore(compressed, toStorePtr, 1);
+        b.CreateAlignedStore(expanded, toStorePtr, 1);
         toWritePos = b.CreateAdd(toWritePos, elementPopCount);
     }
 
@@ -109,9 +119,9 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     b.SetInsertPoint(packFinalize);
 }
 
-typedef void (*FilterByMaskFunctionType)(uint32_t fd);
+typedef void (*spreadByMaskFunctionType)(uint32_t fd);
 
-FilterByMaskFunctionType filterbymask_gen (CPUDriver & pxDriver, re::Name * CC_name) {
+spreadByMaskFunctionType spreadbymask_gen (CPUDriver & pxDriver, re::Name * CC_name) {
 
     auto & b = pxDriver.getBuilder();
     auto P = pxDriver.makePipeline(
@@ -121,57 +131,66 @@ FilterByMaskFunctionType filterbymask_gen (CPUDriver & pxDriver, re::Name * CC_n
 
     //  Create a stream set consisting of a single stream of 8-bit units (bytes).
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    SHOW_BYTES(ByteStream);
 
     //  Read the file into the ByteStream.
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    SHOW_BYTES(ByteStream);
 
-    //  Create a set of 8 parallel streams of 1-bit units (bits).
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
+    //  The Parabix basis bits representation is created by the Parabix S2P kernel.
+    //  S2P stands for serial-to-parallel.
+    StreamSet * BasisBits = P->CreateStreamSet(8);
+    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    //  Transpose the ByteSteam into parallel bit stream form.
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    //  We need to know which input positions are LFs and which are not.
+    //  The nonLF positions need to be expanded to generate two hex digits each.
+    //  The Parabix CharacterClassKernelBuilder can create any desired stream for
+    //  characters.   Note that the input is the set of byte values in the range
+    //  [\x{00}-x{09}\x{0B}-\x{FF}] that is, all byte values except \x{0A}.
+    //  For our example input "Wolf!\b", the nonLF stream is "11111."
+    StreamSet * nonLF = P->CreateStreamSet(1);
+    std::vector<re::CC *> nonLF_CC = {re::makeCC(re::makeByte(0,9), re::makeByte(0xB, 0xff))};
+    P->CreateKernelCall<CharacterClassKernelBuilder>(nonLF_CC, BasisBits, nonLF);
+    SHOW_STREAM(nonLF);
 
-    //  Create a character class bit stream.
-    StreamSet * CCmask = P->CreateStreamSet(1, 1);
+    //  We need to spread out the basis bits to make room for two positions for
+    //  each non LF in the input.   The Parabix function UnitInsertionSpreadMask
+    //  takes care of this using a mask of positions for insertion of one position.
+    //  We insert one position for eacn nonLF character.    Given the
+    //  nonLF stream "11111", the hexInsertMask is "1.1.1.1.1.1"
+    StreamSet * hexInsertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
+    SHOW_STREAM(hexInsertMask);
 
-    std::map<std::string, StreamSet *> propertyStreamMap;
-    auto nameString = CC_name->getFullName();
-    propertyStreamMap.emplace(nameString, CCmask);
-    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCmask);
-    SHOW_STREAM(CCmask);
-
-    StreamSet * u8index = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
-    SHOW_STREAM(u8index);
-
-    StreamSet * CCspans = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<U8Spans>(CCmask, u8index, CCspans);
-    SHOW_STREAM(CCspans);
-
-    StreamSet * const FilteredBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ByteFilterByMaskKernel>(ByteStream, CCspans, FilteredBytes);
-    P->CreateKernelCall<StdOutKernel>(FilteredBytes);
-    SHOW_BYTES(FilteredBytes);
+    // The parabix SpreadByMask function copies bits from an input stream
+    // set to an output stream set, to positions marked by 1s in the first
+    // argument (the spread mask).   Zeroes are inserted everywhere else.
+    // This function performs STEP 1 in the comments above.
+    StreamSet * spreadBasis = P->CreateStreamSet(8);
+    SpreadByMask(P, hexInsertMask, BasisBits, spreadBasis);
+    SHOW_BIXNUM(spreadBasis);
+    
+    StreamSet * const spreadedBytes = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<BytespreadByMaskKernel>(ByteStream, hexInsertMask, spreadedBytes);
+    P->CreateKernelCall<StdOutKernel>(spreadedBytes);
+    SHOW_BYTES(spreadedBytes);
 
     
 
-    return reinterpret_cast<FilterByMaskFunctionType>(P->compile());
+    return reinterpret_cast<spreadByMaskFunctionType>(P->compile());
 }
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, codegen::codegen_flags()});
-    CPUDriver pxDriver("filter");
+    CPUDriver pxDriver("spread");
 
-    FilterByMaskFunctionType fnPtr = nullptr;
+    spreadByMaskFunctionType fnPtr = nullptr;
     re::RE * CC_re = re::simplifyRE(re::RE_Parser::parse(CC_expr));
     CC_re = UCD::linkAndResolve(CC_re);
     CC_re = UCD::externalizeProperties(CC_re);
     if (re::Name * UCD_property_name = dyn_cast<re::Name>(CC_re)) {
-        fnPtr = filterbymask_gen(pxDriver, UCD_property_name);
+        fnPtr = spreadbymask_gen(pxDriver, UCD_property_name);
     } else if (re::CC * CC_ast = dyn_cast<re::CC>(CC_re)) {
-        fnPtr = filterbymask_gen(pxDriver, makeName(CC_ast));
+        fnPtr = spreadbymask_gen(pxDriver, makeName(CC_ast));
     } else {
         std::cerr << "Input expression must be a Unicode property or CC but found: " << CC_expr << " instead.\n";
         exit(1);
@@ -180,19 +199,19 @@ int main(int argc, char *argv[]) {
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         if (errno == EACCES) {
-            std::cerr << "filter: " << inputFile << ": Permission denied.\n";
+            std::cerr << "spread: " << inputFile << ": Permission denied.\n";
         }
         else if (errno == ENOENT) {
-            std::cerr << "filter: " << inputFile << ": No such file.\n";
+            std::cerr << "spread: " << inputFile << ": No such file.\n";
         }
         else {
-            std::cerr << "filter: " << inputFile << ": Failed.\n";
+            std::cerr << "spread: " << inputFile << ": Failed.\n";
         }
         exit(1);
     }
     struct stat sb;
     if (stat(inputFile.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
-        std::cerr << "filter: " << inputFile << ": Is a directory.\n";
+        std::cerr << "spread: " << inputFile << ": Is a directory.\n";
         close(fd);
         exit(1);
     }
