@@ -158,19 +158,19 @@ spreadByMaskFunctionType spreadbymask_gen (CPUDriver & pxDriver, re::Name * CC_n
     //  takes care of this using a mask of positions for insertion of one position.
     //  We insert one position for eacn nonLF character.    Given the
     //  nonLF stream "11111", the hexInsertMask is "1.1.1.1.1.1"
-    StreamSet * hexInsertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
-    SHOW_STREAM(hexInsertMask);
+    StreamSet * insertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
+    SHOW_STREAM(insertMask);
 
     // The parabix SpreadByMask function copies bits from an input stream
     // set to an output stream set, to positions marked by 1s in the first
     // argument (the spread mask).   Zeroes are inserted everywhere else.
     // This function performs STEP 1 in the comments above.
     StreamSet * spreadBasis = P->CreateStreamSet(8);
-    SpreadByMask(P, hexInsertMask, BasisBits, spreadBasis);
+    SpreadByMask(P, insertMask, BasisBits, spreadBasis);
     SHOW_BIXNUM(spreadBasis);
     
     StreamSet * const spreadedBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<BytespreadByMaskKernel>(ByteStream, hexInsertMask, spreadedBytes);
+    P->CreateKernelCall<BytespreadByMaskKernel>(ByteStream, insertMask, spreadedBytes);
     P->CreateKernelCall<StdOutKernel>(spreadedBytes);
     SHOW_BYTES(spreadedBytes);
 
