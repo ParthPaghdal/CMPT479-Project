@@ -51,6 +51,7 @@ using namespace kernel;
 using namespace llvm;
 
 static cl::OptionCategory ufFlags("Command Flags", "spread options");
+static cl::OptionCategory ExpandOptions("Expand Options", "Expand options.");
 static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character class expression>"), cl::Required, cl::cat(ufFlags));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"),  cl::cat(ufFlags));
 
@@ -69,8 +70,8 @@ protected:
 
 BytespreadByMaskKernel::BytespreadByMaskKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const Packed)
 : MultiBlockKernel(b, "byte_spread_by_mask_kernel",
-{Binding{"byteStream", byteStream, FixedRate(1)}, Binding{"spread", spread, FixedRate(1)}},
-    {Binding{"output", Packed, PopcountOf("spread")}}, {}, {}, {}) {}
+{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread, FixedRate(1), Principal()}},
+    {Binding{"output", Packed, FixedRate(1)}}, {}, {}, {}) {}
 
 void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
@@ -158,11 +159,11 @@ spreadByMaskFunctionType spreadbymask_gen (CPUDriver & pxDriver, re::Name * CC_n
     //  takes care of this using a mask of positions for insertion of one position.
     //  We insert one position for eacn nonLF character.    Given the
     //  nonLF stream "11111", the hexInsertMask is "1.1.1.1.1.1"
-    StreamSet * insertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
-    SHOW_STREAM(insertMask);
+    StreamSet * hexInsertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
+    SHOW_STREAM(hexInsertMask);
     
     StreamSet * const spreadedBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<BytespreadByMaskKernel>(ByteStream, insertMask, spreadedBytes);
+    P->CreateKernelCall<BytespreadByMaskKernel>(ByteStream, hexInsertMask, spreadedBytes);
     P->CreateKernelCall<StdOutKernel>(spreadedBytes);
     SHOW_BYTES(spreadedBytes);
 
