@@ -127,7 +127,7 @@ void PipelineCompiler::simplifyPhiNodes(Module * const m) const {
                 PHINode * const phi = cast<PHINode>(inst);
                 #ifndef NDEBUG
                 if (LLVM_UNLIKELY(phi->getNumIncomingValues() != n || n == 0)) {
-                    bb.print(errs(), nullptr, true, false);
+                    bb.print(errs(), true);
                     errs() << "\n\nIllegal PHINode: ";
                     phi->print(errs(), true);
                 }

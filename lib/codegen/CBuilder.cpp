@@ -719,7 +719,7 @@ Value * CBuilder::CreateMAdvise(Value * addr, Value * length, const int advice) 
     Triple T(mTriple);
     Value * result = nullptr;
 
-    if (T.isOSLinux() || T.isTargetMachineMac()) {
+    if (T.isOSLinux() || T.isOSDarwin()) {
         Module * const m = getModule();
         IntegerType * const intTy = getInt32Ty();
         IntegerType * const sizeTy = getSizeTy();
@@ -1461,7 +1461,7 @@ Constant * CBuilder::GetString(StringRef Str) {
     Module * const m = getModule(); assert (m);
     GlobalVariable * ptr = m->getGlobalVariable(Str, true);
     if (ptr == nullptr) {
-        ptr = CreateGlobalString(Str, Str, 0, m);
+        ptr = CreateGlobalString(Str, Str, 0);
     }
     return ConstantExpr::getPointerCast(ptr, getInt8PtrTy());
 }
