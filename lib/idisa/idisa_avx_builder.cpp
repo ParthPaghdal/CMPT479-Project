@@ -762,6 +762,39 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
         Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});    
         }
+    else{
+        llvm::outs() << "Fallback path\n";
+             // Step 1: Initialize indices as 6-bit bixnum in an array of 64-bit integers
+        uint64_t indices[6] = {
+            0x00000000FFFFFFFF,
+            0x0000FFFF0000FFFF,
+            0x00FF00FF00FF00FF,
+            0x0F0F0F0F0F0F0F0F,
+            0x3333333333333333,
+            0x5555555555555555
+        };
+
+        // Step 2: Use PEXT instruction to select only the bixnum values for the bytes to be selected
+        llvm::Value * compressed_indices[6];
+        for (int i = 0; i < 6; ++i) {
+            llvm::Function * pextFunc = llvm::Intrinsic::getDeclaration(getModule(), llvm::Intrinsic::x86_bmi_pext_64);
+            llvm::Value * index = getInt64(indices[i]);
+            compressed_indices[i] = CreateCall(pextFunc->getFunctionType(), pextFunc, {mask, index});
+        }
+
+        // Step 3: Use esimd_bitspread function to spread the bits into a 64xi8 vector
+        llvm::Value * permute_vec = esimd_bitspread(fw, compressed_indices[0]);
+        for (int i = 1; i < 6; ++i) {
+            llvm::Value * spread_vec = esimd_bitspread(fw, compressed_indices[i]);
+            permute_vec = CreateOr(permute_vec, CreateShl(spread_vec, getInt64(i)));
+        }
+
+        // Step 4: Use mvmd_shuffle2 to shuffle using permute_vec
+        llvm::Value * zero_vec = llvm::Constant::getNullValue(a->getType());
+        llvm::Value * shuffled = mvmd_shuffle2(fw, a, zero_vec, permute_vec);
+
+        return shuffled;
+    }
     }
     return IDISA_Builder::mvmd_compress(fw, a, select_mask);
 }
