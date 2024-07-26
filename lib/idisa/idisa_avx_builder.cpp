@@ -773,26 +773,50 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
     Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
         return CreateCall(expandFunc->getFunctionType(), expandFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
+    } else {
+        Type * vecType = FixedVectorType::get(getInt8Ty(), fieldCount);
+        Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
+
+        Value * maskBits = CreateBitCast(select_mask, maskTy);
+        Value * dataVec = CreateBitCast(a, vecType);
+        Value * zeroVec = ConstantVector::getNullValue(vecType);
+
+        // Extend the mask from i1 to i8
+        Value * maskVec = CreateSExt(maskBits, vecType);
+
+        // Create a shuffle mask for interleaving
+        SmallVector<int, 64> maskElements;
+        for (int i = 0; i < maskLength; i++) {
+            // interleave with zero elements
+            maskElements.push_back((maskBits->getAggregateElement(i)->isOneValue()) ? i : maskLength);  
+        }
+        Value * shuffleMask = ConstantVector::get(maskElements);
+
+        // Shuffle dataVec according to the mask
+        Value * expandedDataVec = CreateShuffleVector(dataVec, zeroVec, shuffleMask);
+        return expandedDataVec;
     }
     return IDISA_Builder::mvmd_expand(fw, a, select_mask);
 }
-/*
-llvm::Value * IDISA_AVX512F_Builder::mvmd_byte_expand(llvm::Value * a, llvm::Value * select_mask) {
-    Type * vecType = FixedVectorType::get(getInt8Ty(), 64);
 
-    Value * mask64 = CreateBitCast(select_mask, getInt64Ty());
-    Value * dataVec = CreateBitCast(a, vecType);
+// llvm::Value * IDISA_AVX512F_Builder::mvmd_byte_expand(llvm::Value * a, llvm::Value * select_mask) {
+//     Type * vecType = FixedVectorType::get(getInt8Ty(), 64);
+//     Type * maskTy = FixedVectorType::get(get(getInt1Ty(), 8), 64);
 
-    Value * zeroVec = ConstantVector::getNullValue(vecType);
-    Value * allOnes = Constant::getAllOnesValue(vecType);
+//     Value * mask64 = CreateBitCast(select_mask, maskTy);
+//     Value * dataVec = CreateBitCast(a, vecType);
 
-    Value * maskVec = CreateSExt(mask64, vecType);
-    Value * expandedMask = CreateAnd(CreateShuffleVector(maskVec, maskVec, ConstantVector::getSplat(8, ConstantInt::get(getInt32Ty(), 0))), allOnes);
-    Value * resultVec = CreateOr(CreateAnd(dataVec, expandedMask), CreateAnd(zeroVec, CreateNot(expandedMask)));
+//     Value * zeroVec = ConstantVector::getNullValue(vecType);
+//     Value * allOnes = Constant::getAllOnesValue(vecType);
 
-    return resultVec;
-}
-*/
+//     Value * maskVec = CreateSExt(mask64, vecType);
+//     Value * expandedMask = CreateAnd(CreateShuffleVector(maskVec, maskVec, ConstantVector::getSplat(8, ConstantInt::get(getInt32Ty(), 0))), allOnes);
+//     Value * resultVec = CreateOr(CreateAnd(dataVec, expandedMask), CreateAnd(zeroVec, CreateNot(expandedMask)));
+
+
+//     return resultVec;
+// }
+
 Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, llvm::Value * a, unsigned shift) {
     if (shift == 0) return a;
     if (fw > 32) {
