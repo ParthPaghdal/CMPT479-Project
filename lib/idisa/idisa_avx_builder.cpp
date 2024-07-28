@@ -762,8 +762,32 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
         Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});    
         }
+    else {
+        Type * vecType = FixedVectorType::get(getInt8Ty(), fieldCount);
+        Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
+
+        Value * maskBits = CreateBitCast(select_mask, maskTy);
+        Value * dataVec = CreateBitCast(a, vecType);
+
+        // Extend the mask from i1 to i8
+        Value * maskVec = CreateSExt(maskBits, vecType);
+
+        // Initialize an empty vector for the result
+        Value * compressedDataVec = ConstantVector::getNullValue(vecType);
+
+        // Indices for the compressed vector
+        int compressedIndex = 0;
+        for (int i = 0; i < fieldCount; i++) {
+            // If the mask bit is set, copy the element to the compressed vector
+            if (maskBits->getAggregateElement(i)->isOneValue()) {
+                compressedDataVec = InsertElementInst::Create(compressedDataVec, ExtractElementInst::Create(dataVec, i), compressedIndex);
+                compressedIndex++;
+            }
+        return compressedDataVec;
     }
     return IDISA_Builder::mvmd_compress(fw, a, select_mask);
+    }
+}
 }
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
@@ -773,7 +797,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
     Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
         return CreateCall(expandFunc->getFunctionType(), expandFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
-    } else {
+    } /*else {
         Type * vecType = FixedVectorType::get(getInt8Ty(), fieldCount);
         Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
 
@@ -795,7 +819,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
         // Shuffle dataVec according to the mask
         Value * expandedDataVec = CreateShuffleVector(dataVec, zeroVec, shuffleMask);
         return expandedDataVec;
-    }
+    }*/
     return IDISA_Builder::mvmd_expand(fw, a, select_mask);
 }
 
