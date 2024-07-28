@@ -810,9 +810,15 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
 
         // Create a shuffle mask for interleaving
         SmallVector<int, 64> maskElements;
-        for (int i = 0; i < maskLength; i++) {
-            // interleave with zero elements
-            maskElements.push_back((maskBits->getAggregateElement(i)->isOneValue()) ? i : maskLength);  
+        for (int i = 0; i < fieldCount; i++) {
+            Value * bitMask = mvmd_extract(fw, maskBits, i);
+            Value * bitMaskInt = CreateBitCast(bitMask, getInt8Ty());
+            Value * zeroInt = ConstantInt::get(getInt8Ty(), 0);
+
+            Value * isBitSet = CreateICmpUGT(bitMaskInt, zeroInt);
+            Value * isBitSetInt = CreateZExt(isBitSet, getInt32Ty());
+            
+            maskElements.push_back(isBitSet ? i : fieldCount);
         }
         Value * shuffleMask = ConstantVector::get(maskElements);
 
