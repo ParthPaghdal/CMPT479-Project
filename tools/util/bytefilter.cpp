@@ -73,10 +73,15 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
     Constant * const ZERO = b.getSize(0);
 
+    Value * initToWritePos = b.getProducedItemCount("output");
+
     b.CreateBr(packLoop);
+
     b.SetInsertPoint(packLoop);
     PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
+    PHINode * const toWritePosPhi = b.CreatePHI(b.getSizeTy(), 2);
+    toWritePosPhi->addIncoming(initToWritePos, entry);
 
     Value * filterVec = b.loadInputStreamBlock("filter", ZERO, blockOffsetPhi);
 
@@ -84,7 +89,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     filterVec = b.CreateBitCast(filterVec, popVecTy);
 
-    Value * toWritePos = b.getProducedItemCount("output");
+    Value * toWritePos = toWritePosPhi;
 
     for (unsigned i = 0; i < 8; ++i) {
         Value * const filterElem = b.CreateExtractElement(filterVec, b.getInt32(i));
@@ -103,6 +108,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, packLoop);
+    toWritePosPhi->addIncoming(toWritePos, packLoop);
     Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
 
     b.CreateCondBr(moreToDo, packLoop, packFinalize);
