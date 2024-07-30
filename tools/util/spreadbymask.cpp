@@ -79,10 +79,15 @@ void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
     Constant * const ZERO = b.getSize(0);
 
+    Value * initToWritePos = b.getProducedItemCount("output");
+
     b.CreateBr(packLoop);
     b.SetInsertPoint(packLoop);
     PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
+
+    PHINode * const toWritePosPhi = b.CreatePHI(b.getSizeTy(), 2);
+    toWritePosPhi->addIncoming(initToWritePos, entry);
 
     Value * spreadVec = b.loadInputStreamBlock("spread", ZERO, blockOffsetPhi);
 
@@ -90,7 +95,7 @@ void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     spreadVec = b.CreateBitCast(spreadVec, popVecTy);
 
-    Value * toWritePos = b.getProducedItemCount("output");
+    Value * toWritePos = toWritePosPhi;
 
     for (unsigned i = 0; i < 8; ++i) {
         Value * const spreadElem = b.CreateExtractElement(spreadVec, b.getInt32(i));
@@ -114,6 +119,7 @@ void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, packLoop);
+    toWritePosPhi->addIncoming(toWritePos, packLoop);
     Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
 
     b.CreateCondBr(moreToDo, packLoop, packFinalize);
