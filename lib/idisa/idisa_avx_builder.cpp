@@ -763,41 +763,41 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});    
         }
     else {
-        Type * vecType = FixedVectorType::get(getInt8Ty(), fieldCount);
         Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
+        uint64_t indices[6] = { 0x00000000FFFFFFFF, 
+                                0x0000FFFF0000FFFF, 
+                                0x00FF00FF00FF00FF, 
+                                0x0F0F0F0F0F0F0F0F, 
+                                0x3333333333333333, 
+                                0x5555555555555555
+                                };
+        Function * PEXT_func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_64);
+        Value * compressed_indices[6];
+        for (int i = 0; i < 6;i++){
+        compressed_indices[i]= CreateCall(PEXT_func->getFunctionType(), PEXT_func, {indices[i], mask});
+        }
+        Value * permute_vec;
+        permute_vec = esimd_bitspread(64, compressed_indices[0]);
+        for (int k = 1; k < 6;k++){
+        permute_vec |= esimd_bitspread(64, compressed_indices[k]);
+        }
 
-        Value * maskBits = CreateBitCast(select_mask, maskTy);
-        Value * dataVec = CreateBitCast(a, vecType);
+        return mvmd_shuffle(fw,  a, permute_vec);
 
-        // Extend the mask from i1 to i8
-        Value * maskVec = CreateSExt(maskBits, vecType);
-
-        // Initialize an empty vector for the result
-        Value * compressedDataVec = ConstantVector::getNullValue(vecType);
-
-        // Indices for the compressed vector
-        int compressedIndex = 0;
-        for (int i = 0; i < fieldCount; i++) {
-            // If the mask bit is set, copy the element to the compressed vector
-            if (maskBits->getAggregateElement(i)->isOneValue()) {
-                compressedDataVec = InsertElementInst::Create(compressedDataVec, ExtractElementInst::Create(dataVec, i), compressedIndex);
-                compressedIndex++;
-            }
-        return compressedDataVec;
+    
+        }
     }
     return IDISA_Builder::mvmd_compress(fw, a, select_mask);
-    }
-}
 }
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
     unsigned fieldCount = mBitBlockWidth/fw;
     Value * mask = CreateZExtOrTrunc(select_mask, getIntNTy(fieldCount));
-    if (hostCPUFeatures.hasAVX512VBMI2){
+   /* if (!hostCPUFeatures.hasAVX512VBMI2){
     Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
         return CreateCall(expandFunc->getFunctionType(), expandFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
-    } /*else {
+    }else {
         Type * vecType = FixedVectorType::get(getInt8Ty(), fieldCount);
         Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
 
@@ -805,24 +805,24 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
         Value * dataVec = CreateBitCast(a, vecType);
         Value * zeroVec = ConstantVector::getNullValue(vecType);
 
-        // Extend the mask from i1 to i8
-        Value * maskVec = CreateSExt(maskBits, vecType);
-
-        // Create a shuffle mask for interleaving
-        SmallVector<int, 64> maskElements;
+        SmallVector<int, 64> maskElements(fieldCount);
         for (int i = 0; i < fieldCount; i++) {
             Value * bitMask = mvmd_extract(fw, maskBits, i);
             Value * bitMaskInt = CreateBitCast(bitMask, getInt8Ty());
             Value * zeroInt = ConstantInt::get(getInt8Ty(), 0);
 
             Value * isBitSet = CreateICmpUGT(bitMaskInt, zeroInt);
-            Value * isBitSetInt = CreateZExt(isBitSet, getInt32Ty());
             
-            maskElements.push_back(isBitSet ? i : fieldCount);
+            maskElements[i] = isBitSet ? i : fieldCount;
         }
-        Value * shuffleMask = ConstantVector::get(maskElements);
 
-        // Shuffle dataVec according to the mask
+        std::vector<Constant*> constMaskElements;
+        for (int element : maskElements){
+            constMaskElements.push_back(ConstantInt::get(Type::getInt32Ty(getContext()), element));
+        }
+        ArrayRef<Constant*> constMaskArrayRef(constMaskElements);
+        Value * shuffleMask = ConstantVector::get(constMaskArrayRef);
+
         Value * expandedDataVec = CreateShuffleVector(dataVec, zeroVec, shuffleMask);
         return expandedDataVec;
     }*/
