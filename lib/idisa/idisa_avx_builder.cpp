@@ -732,7 +732,6 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, 
 #endif
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
-
     unsigned fieldCount = mBitBlockWidth/fw;
     Value * mask = CreateZExtOrTrunc(select_mask, getIntNTy(fieldCount));
     if (mBitBlockWidth == 512 && fw == 32) {
@@ -755,15 +754,20 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
         return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(64, a), fwCast(64, allZeroes()), CreateBitCast(mask, maskTy)});
 #endif
     }
-    
-    if (mBitBlockWidth == 512 && fw == 8) { 
-    if (hostCPUFeatures.hasAVX512VBMI2){
-        Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
-        Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
-        return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});    
-        }
-    else {
-        llvm::outs() << "Fallback path\n";
+
+     if (mBitBlockWidth == 512 && fw == 8) {
+        if(hostCPUFeatures.hasAVX512VBMI2){
+            //llvm::outs() << "Main path\n";
+ #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(9, 0, 0)
+            Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_b_512);
+            return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), mask});
+ #else
+            Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
+            Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
+            return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
+ #endif
+        }else{
+            llvm::outs() << "Fallback path\n";
              // Step 1: Initialize indices as 6-bit bixnum in an array of 64-bit integers
         uint64_t indices[6] = {
             0x00000000FFFFFFFF,
@@ -795,6 +799,33 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
 
         // return shuffled;
         return mvmd_shuffle(8, a, permute_vec);
+
+
+        //     llvm::outs() << "Fallback path\n";
+
+        //     llvm::Type * vecTy = llvm::FixedVectorType::get(getIntNTy(8), 64);
+        // llvm::Value * idxs = llvm::UndefValue::get(vecTy);
+        // for (unsigned i = 0; i < 64; ++i) {
+        //     idxs = CreateInsertElement(idxs, getIntN(8, i), getInt32(i));
+        // }
+
+        // // Extract bits from the index vector based on the mask
+        // llvm::Value * permute_vec = simd_pext(fw, idxs, mask);
+
+        // // Spread bits into 8-bit fields
+        // llvm::Value * spread_vec = esimd_bitspread(8, permute_vec);
+
+        // // Perform the shuffle using the spread vector as the index vector
+        // llvm::Value * shuffled = mvmd_shuffle(fw, a, spread_vec);
+
+        // return shuffled;
+            
+
+        }
+
+     }
+
+    return IDISA_Builder::mvmd_compress(fw, a, select_mask);
 }
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
