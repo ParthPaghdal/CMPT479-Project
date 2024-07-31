@@ -84,6 +84,8 @@ void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     b.SetInsertPoint(packLoop);
     PHINode * toReadPosPhi = b.CreatePHI(b.getSizeTy(), 2);
     toReadPosPhi->addIncoming(initPos, entry);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockOffsetPhi->addIncoming(ZERO, entry);
 
     // Load spread vector
     Value * spreadVec = b.loadInputStreamBlock("spread", ZERO, toReadPosPhi);
@@ -92,42 +94,33 @@ void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     // Output tracking
     Value * toWritePos = b.getProducedItemCount("output");
-
+    Value * toReadPos = toReadPosPhi;
     for (unsigned i = 0; i < 8; ++i) {
         Value * spreadElem = b.CreateExtractElement(spreadVec, b.getInt32(i));
         Value * elementPopCount = b.CreatePopcount(spreadElem);
 
         // Get a pointer to the next unprocessed item
-        Value * toReadPtr = b.getRawInputPointer("byteStream", toReadPosPhi);
+        Value * toReadPtr = b.getRawInputPointer("byteStream", toReadPos);
         VectorType * dataVecTy = FixedVectorType::get(b.getIntNTy(8), b.getBitBlockWidth() / 8);
         toReadPtr = b.CreatePointerCast(toReadPtr, dataVecTy->getPointerTo());
         Value * data = b.CreateAlignedLoad(dataVecTy, toReadPtr, 1);
 
         // Expand the loaded data
-        Value * expanded[8];
-        for(int j=0; j<8; j++)
-            expanded[j] = b.mvmd_expand(8, data, spreadElem);
-
-        // Debugging outputs
-        llvm::outs() << "spreadElem" << i << ": " << *spreadElem << "\n";
-        llvm::outs() << "data" << i << ": " << *data << "\n";
-        llvm::outs() << "expanded" << i << ": " << *expanded << "\n";
+        Value * expanded = b.mvmd_expand(8, data, spreadElem);
 
         // Store the expanded data in the i-th pack of the current stride
-        for(int j=0; j<8; j++)
-            b.storeOutputStreamPack("output", ZERO, b.getInt32(j), toWritePos, expanded[j]);
+        b.storeOutputStreamPack("output", ZERO, b.getInt32(i), blockOffsetPhi, expanded);
 
         // Update the write position for the next pack
-        toWritePos = b.CreateAdd(toWritePos, elementPopCount);
+        toReadPos = b.CreateAdd(toReadPos, elementPopCount);
 
-        // Update the read position
-        Value * newReadPos = b.CreateAdd(toReadPosPhi, elementPopCount);
-        toReadPosPhi->addIncoming(newReadPos, packLoop);
     }
 
     // Finalize loop
     Value * nextBlk = b.CreateAdd(toReadPosPhi, b.getSize(1));
-    toReadPosPhi->addIncoming(nextBlk, packLoop);
+    toReadPosPhi->addIncoming(toReadPos, packLoop);
+    nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    blockOffsetPhi->addIncoming(nextBlk, packLoop);
     Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
 
     b.CreateCondBr(moreToDo, packLoop, packFinalize);
