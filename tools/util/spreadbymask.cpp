@@ -93,8 +93,8 @@ void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     spreadVec = b.CreateBitCast(spreadVec, popVecTy);
 
     // Output tracking
-    Value * toWritePos = b.getProducedItemCount("output");
-    Value * toReadPos = toReadPosPhi;
+    Value * toWritePos = blockOffsetPhi;
+    Value * toReadPos = toReadPosPhi; 
     for (unsigned i = 0; i < 8; ++i) {
         Value * spreadElem = b.CreateExtractElement(spreadVec, b.getInt32(i));
         Value * elementPopCount = b.CreatePopcount(spreadElem);
@@ -109,7 +109,7 @@ void BytespreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         Value * expanded = b.mvmd_expand(8, data, spreadElem);
 
         // Store the expanded data in the i-th pack of the current stride
-        b.storeOutputStreamPack("output", ZERO, b.getInt32(i), blockOffsetPhi, expanded);
+        b.storeOutputStreamPack("output", ZERO, b.getInt32(i), toWritePos, expanded);
 
         // Update the write position for the next pack
         toReadPos = b.CreateAdd(toReadPos, elementPopCount);
