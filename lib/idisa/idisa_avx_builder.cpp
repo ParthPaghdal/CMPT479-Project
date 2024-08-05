@@ -820,7 +820,7 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, llvm::Value * a,
 llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) {
     unsigned fieldCount = mBitBlockWidth/fw;
     Value * mask = CreateZExtOrTrunc(select_mask, getIntNTy(fieldCount));
-    if (!hostCPUFeatures.hasAVX512VBMI2)
+    if (hostCPUFeatures.hasAVX512VBMI2)
     {
     Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
@@ -829,27 +829,26 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
     else{
         llvm::outs() << "Fallback path\n";
         Type * vecType = FixedVectorType::get(getInt8Ty(), fieldCount);
-        Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
+        Type * maskType = FixedVectorType::get(getInt1Ty(), fieldCount); 
 
-        Value * maskBits = CreateBitCast(select_mask, maskTy);
+        Value * maskBits = CreateBitCast(select_mask, maskType);
         Value * dataVec = CreateBitCast(a, vecType);
         Value * zeroVec = ConstantVector::getNullValue(vecType);
 
-        SmallVector<int, 64> maskElements(fieldCount);
-        for (int i = 0; i < fieldCount; i++) {
-            Value * bitMask = mvmd_extract(fw, maskBits, i);
-            Value * bitMaskInt = CreateBitCast(bitMask, getInt8Ty());
-            Value * zeroInt = ConstantInt::get(getInt8Ty(), 0);
-
-            Value * isBitSet = CreateICmpUGT(bitMaskInt, zeroInt);
-            
-            maskElements[i] = isBitSet ? i : fieldCount;
+        std::vector<int> maskElements(fieldCount, fieldCount);
+        for (unsigned i = 0; i < fieldCount; i++) {
+            if (ConstantInt *CI = dyn_cast<ConstantInt>(mvmd_extract(fw, maskBits, i))){
+                if (CI->isOne()){
+                    maskElements[i] = i;
+                }
+            }
         }
 
         std::vector<Constant*> constMaskElements;
         for (int element : maskElements){
             constMaskElements.push_back(ConstantInt::get(Type::getInt32Ty(getContext()), element));
         }
+
         ArrayRef<Constant*> constMaskArrayRef(constMaskElements);
         Value * shuffleMask = ConstantVector::get(constMaskArrayRef);
 
