@@ -842,18 +842,19 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
         std::vector<int> maskElements(fieldCount, fieldCount);
 
         //loop over the mask bits to determine which element to keep
-        for (unsigned i = 0, idx =0; i < fieldCount; i++) {
-             Value * bitMask = mvmd_extract(fw, maskBits, i);
-             Value * bitMaskInt = CreateBitCast(bitMask, getInt8Ty());
-             Value * zeroInt = ConstantInt::get(getInt8Ty(), 0);
+        for (unsigned i = 0, j = 0; i < fieldCount; i++) {
+            Value * bitMask = mvmd_extract(fw, maskBits, i);
+            Value * bitMaskInt = CreateBitCast(bitMask, getInt8Ty());
+            Value * zeroInt = ConstantInt::get(getInt8Ty(), 0);
 
             Value * isBitSet = CreateICmpUGT(bitMaskInt, zeroInt);
+            bool bitSet = (llvm::cast<ConstantInt>(isBitSet)->getZExtValue() == 1);
 
             //if bit is set, store the current index in maskElements
-            if (ConstantInt *CI = llvm::dyn_cast<llvm::ConstantInt>(isBitSet)){
-                if (CI->isOne()){
-                     maskElements[idx++] = i;
-                }
+            if (bitSet){
+                maskElements[i] = j;
+                j++;
+                
             }
         }
 
