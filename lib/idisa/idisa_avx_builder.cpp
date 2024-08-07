@@ -832,32 +832,32 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
         Type * vecType = FixedVectorType::get(getInt8Ty(), fieldCount);
         Type * maskType = FixedVectorType::get(getInt1Ty(), fieldCount); 
 
-        // Convert select mask to mask type
+        // Convert select mask to mask type.
         Value * maskBits = CreateBitCast(select_mask, maskType);
-        // Convert data to data vector type
+        // Convert data to data vector type.
         Value * dataVec = CreateBitCast(a, vecType);
         Value * zeroVec = ConstantVector::getNullValue(vecType);
 
-        //Initialize a vector to store the indices for shuffling
+        //Initialize a vector to store the indices for shuffling.
         std::vector<int> maskElements(fieldCount, fieldCount);
 
-        //loop over the mask bits to determine which element to keep
-        for (unsigned i = 0, idx = 0; i < fieldCount; i++) {
-            Value * bitMask = mvmd_extract(fw, maskBits, i);
-            Value * bitMaskInt = CreateBitCast(bitMask, getInt8Ty());
-            Value * zeroInt = ConstantInt::get(getInt8Ty(), 0);
+        //loop over the mask bits to determine which element to keep.
+        for (unsigned i = 0, idx =0; i < fieldCount; i++) {
+             Value * bitMask = mvmd_extract(fw, maskBits, i);
+             Value * bitMaskInt = CreateBitCast(bitMask, getInt8Ty());
+             Value * zeroInt = ConstantInt::get(getInt8Ty(), 0);
 
             Value * isBitSet = CreateICmpUGT(bitMaskInt, zeroInt);
 
-            //if bit is set, store the current index in maskElements
+            //if bit is set, store the current index in maskElements.
             if (ConstantInt *CI = llvm::dyn_cast<llvm::ConstantInt>(isBitSet)){
                 if (CI->isOne()){
-                    maskElements[idx++] = i;
+                     maskElements[idx++] = i;
                 }
             }
         }
 
-        //Convert maskElements to LLVM Constants
+        //Convert maskElements to LLVM Constants.
         std::vector<Constant*> constMaskElements;
         for (int element : maskElements){
             constMaskElements.push_back(ConstantInt::get(Type::getInt32Ty(getContext()), element));
@@ -865,10 +865,10 @@ llvm::Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, llvm::Value * a, l
 
         ArrayRef<Constant*> constMaskArrayRef(constMaskElements);
 
-        //Create the shuffle mask from the constants
+        //Create the shuffle mask from the constants.
         Value * shuffleMask = ConstantVector::get(constMaskArrayRef);
 
-        //Create the shuffled vector
+        //Create the shuffled vector.
         Value * expandedDataVec = CreateShuffleVector(dataVec, zeroVec, shuffleMask);
         return expandedDataVec;
     }
